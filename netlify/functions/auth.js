@@ -775,13 +775,16 @@ async function handleGetSupports() {
 
 async function handleValidateKey(body) {
   const { api, key, hwid, system_info } = body;
-  
-  if (!api || !key) {
-    return response(400, { success: false, message: 'API and Key are required' });
+
+  if (!api || !key || !hwid) {
+    return response(400, { success: false, message: 'API, Key, HWID are required' });
   }
 
-  // Check if app exists
-  const appResult = await pool.query('SELECT * FROM applications WHERE api_key = $1', [api]);
+  // Check app
+  const appResult = await pool.query(
+    'SELECT * FROM applications WHERE api_key = $1',
+    [api]
+  );
   if (appResult.rows.length === 0) {
     return response(200, { success: false, message: 'Invalid API' });
   }
@@ -791,43 +794,61 @@ async function handleValidateKey(body) {
     'SELECT * FROM keys WHERE key = $1 AND api = $2',
     [key, api]
   );
-
   if (keyResult.rows.length === 0) {
     return response(200, { success: false, message: 'Invalid key' });
   }
 
-  const keyData = keyResult.rows[0];
+  const k = keyResult.rows[0];
 
-  if (keyData.banned) {
+  if (k.banned) {
     return response(200, { success: false, message: 'Key banned' });
   }
 
-  // Check expiration
+  // Expiration
   const now = new Date();
-  const expires = new Date(keyData.expires_at);
+  const expires = new Date(k.expires_at);
   if (now > expires) {
     return response(200, { success: false, message: 'Key expired' });
   }
 
-  // HWID check
-  if (keyData.hwid && keyData.hwid !== hwid) {
-    return response(200, { success: false, message: 'HWID mismatch' });
+  // =========================
+  // 🔐 MULTI DEVICE LOGIC
+  // =========================
+
+  let hwids = [];
+  if (k.hwid) {
+    try {
+      hwids = JSON.parse(k.hwid);
+    } catch {
+      hwids = [];
+    }
   }
 
-  // Update key info on first use
-  if (!keyData.used) {
-    await pool.query(
-      `UPDATE keys SET used = true, hwid = $1, system_info = $2, first_used = CURRENT_TIMESTAMP 
-       WHERE key = $3 AND api = $4`,
-      [hwid, system_info, key, api]
-    );
+  // HWID đã tồn tại → cho qua
+  if (hwids.includes(hwid)) {
+    return response(200, { success: true, message: 'Valid key' });
   }
 
-  // Return SIMPLE response format
-  return response(200, { 
-    success: true, 
-    message: 'Valid key'
-  });
+  // Quá giới hạn thiết bị
+  const limit = k.device_limit || 1;
+  if (hwids.length >= limit) {
+    return response(200, { success: false, message: 'Key limited' });
+  }
+
+  // Thêm thiết bị mới
+  hwids.push(hwid);
+
+  await pool.query(
+    `UPDATE keys 
+     SET hwid = $1,
+         used = true,
+         system_info = $2,
+         first_used = COALESCE(first_used, CURRENT_TIMESTAMP)
+     WHERE key = $3 AND api = $4`,
+    [JSON.stringify(hwids), system_info, key, api]
+  );
+
+  return response(200, { success: true, message: 'Valid key' });
 }
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -839,4 +860,4 @@ function generateKey() {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
-    }
+}
