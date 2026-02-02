@@ -501,27 +501,42 @@ async function handleCreateKey(body) {
 async function handleGetApps(body) {
   const { user_id } = body;
   const isAdmin = await checkIfAdmin(user_id);
-  
-  // Kiểm tra xem có phải support không
   const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
   const isSupport = supportCheck.rows.length > 0;
 
-  let result;
-  if (isAdmin || isSupport) {
-    // Admin và Support được thấy TẤT CẢ App
-    result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
-  } else {
-    // Người dùng thường chỉ thấy App của họ
-    result = await pool.query('SELECT * FROM applications WHERE created_by = $1', [user_id]);
+  let query = `
+    SELECT 
+      a.*,
+      COALESCE(COUNT(k.id), 0) as key_count
+    FROM applications a
+    LEFT JOIN keys k ON a.api_key = k.api
+    GROUP BY a.id
+    ORDER BY a.created_at DESC
+  `;
+
+  let params = [];
+  if (!isAdmin && !isSupport) {
+    query = `
+      SELECT 
+        a.*,
+        COALESCE(COUNT(k.id), 0) as key_count
+      FROM applications a
+      LEFT JOIN keys k ON a.api_key = k.api
+      WHERE a.created_by = $1
+      GROUP BY a.id
+      ORDER BY a.created_at DESC
+    `;
+    params = [user_id];
   }
+
+  const result = await pool.query(query, params);
   
   return response(200, { 
     success: true, 
-    applications: result.rows,
+    applications: result.rows,   // Bây giờ mỗi row có thêm .key_count
     is_admin: isAdmin
   });
 }
-
 
 async function handleGetMyApps(body) {
   const { user_id } = body;
