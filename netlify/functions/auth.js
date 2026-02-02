@@ -709,37 +709,73 @@ async function handleGetKeys(body) {
   });
 }
 
+// ==================== QUẢN LÝ SUPPORT (FULL) ====================
+
 async function handleAddSupport(body) {
-  const { user_id, admin_id } = body;
-  
-  if (!user_id || !admin_id) {
-    return response(400, { success: false, message: 'User ID and Admin ID are required' });
-  }
-
-  // Check if admin has permission
-  const isAdmin = await checkIfAdmin(admin_id);
-  if (!isAdmin) {
-    return response(403, { success: false, message: 'Chỉ admin mới có thể thêm support' });
-  }
-
-  try {
-    const result = await pool.query(
-      'INSERT INTO supports (user_id, added_by) VALUES ($1, $2) RETURNING *',
-      [user_id, admin_id]
-    );
+    // 1. Lấy dữ liệu từ body do Frontend gửi lên
+    const { user_id, admin_id } = body;
     
-    return response(200, { 
-      success: true, 
-      message: 'Support user added successfully',
-      support: result.rows[0] 
-    });
-  } catch (error) {
-    if (error.code === '23505') {
-      return response(200, { success: false, message: 'User is already a support' });
+    console.log(`🚀 Đang thực hiện thêm support: ${user_id} bởi Admin: ${admin_id}`);
+
+    // 2. Kiểm tra đầu vào
+    if (!user_id || !admin_id) {
+        return response(400, { 
+            success: false, 
+            message: 'Thiếu User ID hoặc Admin ID' 
+        });
     }
-    throw error;
-  }
+
+    // 3. Kiểm tra quyền (Chỉ techdavisk007 mới có quyền add người khác)
+    const isAdmin = await checkIfAdmin(admin_id);
+    if (!isAdmin) {
+        return response(403, { 
+            success: false, 
+            message: 'Bạn không có quyền thực hiện hành động này' 
+        });
+    }
+
+    try {
+        // 4. Kiểm tra xem User này đã tồn tại trong bảng support chưa (Tránh lỗi 23505)
+        const checkExist = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+        
+        if (checkExist.rows.length > 0) {
+            return response(200, { 
+                success: false, 
+                message: `ID ${user_id} đã có quyền Support rồi!` 
+            });
+        }
+
+        // 5. Thực hiện chèn vào Database
+        // Sử dụng tham số $1, $2 để chống SQL Injection và đảm bảo lấy đúng user_id bạn nhập
+        const result = await pool.query(
+            'INSERT INTO supports (user_id, added_by, added_at) VALUES ($1, $2, NOW()) RETURNING *',
+            [user_id, admin_id]
+        );
+        
+        console.log('✅ Thêm support thành công:', result.rows[0]);
+
+        return response(200, { 
+            success: true, 
+            message: 'Đã thêm Support thành công!',
+            support: result.rows[0] 
+        });
+
+    } catch (error) {
+        console.error('❌ Lỗi Database tại handleAddSupport:', error);
+        
+        // Xử lý lỗi trùng khóa (Unique Constraint) nếu bước 4 bị bỏ qua do race condition
+        if (error.code === '23505') {
+            return response(200, { success: false, message: 'User này đã tồn tại!' });
+        }
+
+        return response(500, { 
+            success: false, 
+            message: 'Lỗi server khi thêm support: ' + error.message 
+        });
+    }
 }
+
+
 
 async function handleDeleteSupport(body) {
   const { user_id, admin_id } = body;
@@ -771,11 +807,17 @@ async function handleDeleteSupport(body) {
 }
 
 async function handleGetSupports() {
-  const result = await pool.query('SELECT * FROM supports ORDER BY added_at DESC');
-  return response(200, { 
-    success: true, 
-    supports: result.rows 
-  });
+    try {
+        // Lấy danh sách support mới nhất hiện lên đầu
+        const result = await pool.query('SELECT * FROM supports ORDER BY added_at DESC');
+        return response(200, { 
+            success: true, 
+            supports: result.rows 
+        });
+    } catch (error) {
+        console.error('❌ Lỗi Get Supports:', error);
+        return response(500, { success: false, message: 'Không thể tải danh sách support' });
+    }
 }
 
 async function handleValidateKey(body) {
