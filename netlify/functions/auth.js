@@ -135,7 +135,7 @@ async function initializeTables(client) {
 initializeDatabaseWithRetry().catch(console.error);
 
 const MAIN_ADMIN_ID = '23082010';
-const MAX_APPS_FOR_SUPPORT = 20;
+const MAX_APPS_FOR_SUPPORT = 3;
 
 exports.handler = async (event, context) => {
   console.log('🔧 Function invoked:', event.httpMethod, event.path);
