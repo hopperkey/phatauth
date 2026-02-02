@@ -37,7 +37,7 @@ async function initializeDatabaseWithRetry() {
         ssl: { rejectUnauthorized: false }, // Bắt buộc với Neon
         connectionTimeoutMillis: 10000,
         idleTimeoutMillis: 30000,
-        max: 5
+        max: 10
       });
 
       // Test connection
@@ -330,13 +330,6 @@ function response(statusCode, body) {
 async function checkIfAdmin(user_id) {
   return user_id === MAIN_ADMIN_ID;
 }
-async function checkIfSupport(user_id) {
-  const result = await pool.query(
-    'SELECT 1 FROM supports WHERE user_id = $1',
-    [user_id]
-  );
-  return result.rows.length > 0;
-}
 
 async function getUserAppCount(user_id) {
   const result = await pool.query(
@@ -347,15 +340,12 @@ async function getUserAppCount(user_id) {
 }
 
 async function checkAppPermission(user_id, api_key) {
-  // Admin và Support đều có toàn quyền với app
-  const isAdmin   = await checkIfAdmin(user_id);
-  const isSupport = await checkIfSupport(user_id);
-  
-  if (isAdmin || isSupport) {
-    return { hasPermission: true, isAdmin: isAdmin };
+  // Admin có toàn quyền
+  if (user_id === MAIN_ADMIN_ID) {
+    return { hasPermission: true, isAdmin: true };
   }
 
-  // Chỉ user thường mới check owner
+  // Check nếu user là owner của app
   const result = await pool.query(
     'SELECT * FROM applications WHERE api_key = $1 AND created_by = $2',
     [api_key, user_id]
@@ -385,24 +375,19 @@ async function handleCheckSupport(body) {
 }
 
 async function handleCheckPermission(body) {
-  const { user_id, api } = body;
-  
-  if (!user_id) {
-    return response(400, { success: false, message: 'User ID is required' });
-  }
-
-  const permission = await checkAppPermission(user_id, api);
-  const appCount = await getUserAppCount(user_id);
-  const isAdmin = await checkIfAdmin(user_id);
+  const { user_id } = body;
+  const isAdmin = (user_id === MAIN_ADMIN_ID);
+  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
   
   return response(200, { 
     success: true, 
-    has_permission: permission.hasPermission,
+    has_permission: isAdmin || supportCheck.rows.length > 0, // Quan trọng: Cho phép vào dashboard
     is_admin: isAdmin,
-    app_count: appCount,
+    app_count: await getUserAppCount(user_id),
     max_apps: isAdmin ? 999 : MAX_APPS_FOR_SUPPORT
   });
 }
+
 
 async function handleCreateApp(body) {
   const { app_name, user_id } = body;
@@ -492,25 +477,20 @@ async function handleCreateKey(body) {
 
 async function handleGetApps(body) {
   const { user_id } = body;
-  
-  if (!user_id) {
-    return response(400, { success: false, message: 'User ID is required' });
+  if (!user_id) return response(400, { success: false, message: 'User ID is required' });
+
+  // Kiểm tra xem có phải Admin hoặc Support không
+  const isAdmin = (user_id === MAIN_ADMIN_ID);
+  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+  const isSupport = supportCheck.rows.length > 0;
+
+  if (!isAdmin && !isSupport) {
+    return response(403, { success: false, message: 'Không có quyền truy cập' });
   }
 
-  const isAdmin   = await checkIfAdmin(user_id);
-  const isSupport = await checkIfSupport(user_id);
-
-  let result;
-  if (isAdmin || isSupport) {
-    // Admin và Support xem TẤT CẢ applications
-    result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
-  } else {
-    // User thường chỉ xem apps của mình
-    result = await pool.query(
-      'SELECT * FROM applications WHERE created_by = $1 ORDER BY created_at DESC',
-      [user_id]
-    );
-  }
+  // Cho phép cả Admin và Support xem TẤT CẢ các App để quản lý
+  // Hoặc nếu muốn Support chỉ xem app của họ thì giữ nguyên cũ
+  const result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
   
   return response(200, { 
     success: true, 
@@ -518,6 +498,7 @@ async function handleGetApps(body) {
     is_admin: isAdmin
   });
 }
+
 
 async function handleGetMyApps(body) {
   const { user_id } = body;
