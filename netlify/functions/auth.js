@@ -340,22 +340,25 @@ async function getUserAppCount(user_id) {
 }
 
 async function checkAppPermission(user_id, api_key) {
-  // Admin có toàn quyền
-  if (user_id === MAIN_ADMIN_ID) {
-    return { hasPermission: true, isAdmin: true };
-  }
+  // 1. Admin tối cao luôn có quyền
+  if (user_id === MAIN_ADMIN_ID) return { hasPermission: true, isAdmin: true };
 
-  // Check nếu user là owner của app
+  // 2. Kiểm tra xem user_id này có trong bảng supports không
+  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+  const isSupport = supportCheck.rows.length > 0;
+
+  // Nếu là support, cho phép quản lý mọi app (hoặc bạn có thể giới hạn lại nếu muốn)
+  if (isSupport) return { hasPermission: true, isAdmin: false };
+
+  // 3. Cuối cùng mới check xem có phải chủ sở hữu không
   const result = await pool.query(
     'SELECT * FROM applications WHERE api_key = $1 AND created_by = $2',
     [api_key, user_id]
   );
   
-  return { 
-    hasPermission: result.rows.length > 0, 
-    isAdmin: false 
-  };
+  return { hasPermission: result.rows.length > 0, isAdmin: false };
 }
+
 
 // ==================== DATABASE HANDLERS ====================
 
