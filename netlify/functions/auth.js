@@ -120,7 +120,7 @@ async function initializeTables(client) {
     // Thêm admin mặc định
     await client.query(`
       INSERT INTO supports (user_id, added_by) 
-      VALUES ('1279324001180844085', 'system')
+      VALUES ('23082010', 'system')
       ON CONFLICT (user_id) DO NOTHING
     `);
 
@@ -134,7 +134,7 @@ async function initializeTables(client) {
 // Khởi tạo ngay khi load
 initializeDatabaseWithRetry().catch(console.error);
 
-const MAIN_ADMIN_ID = '1279324001180844085';
+const MAIN_ADMIN_ID = '23082010';
 const MAX_APPS_FOR_SUPPORT = 3;
 
 exports.handler = async (event, context) => {
@@ -330,6 +330,13 @@ function response(statusCode, body) {
 async function checkIfAdmin(user_id) {
   return user_id === MAIN_ADMIN_ID;
 }
+async function checkIfSupport(user_id) {
+  const result = await pool.query(
+    'SELECT 1 FROM supports WHERE user_id = $1',
+    [user_id]
+  );
+  return result.rows.length > 0;
+}
 
 async function getUserAppCount(user_id) {
   const result = await pool.query(
@@ -340,12 +347,15 @@ async function getUserAppCount(user_id) {
 }
 
 async function checkAppPermission(user_id, api_key) {
-  // Admin có toàn quyền
-  if (user_id === MAIN_ADMIN_ID) {
-    return { hasPermission: true, isAdmin: true };
+  // Admin và Support đều có toàn quyền với app
+  const isAdmin   = await checkIfAdmin(user_id);
+  const isSupport = await checkIfSupport(user_id);
+  
+  if (isAdmin || isSupport) {
+    return { hasPermission: true, isAdmin: isAdmin };
   }
 
-  // Check nếu user là owner của app
+  // Chỉ user thường mới check owner
   const result = await pool.query(
     'SELECT * FROM applications WHERE api_key = $1 AND created_by = $2',
     [api_key, user_id]
@@ -487,14 +497,15 @@ async function handleGetApps(body) {
     return response(400, { success: false, message: 'User ID is required' });
   }
 
-  const isAdmin = await checkIfAdmin(user_id);
+  const isAdmin   = await checkIfAdmin(user_id);
+  const isSupport = await checkIfSupport(user_id);
 
   let result;
-  if (isAdmin) {
-    // Admin thấy tất cả apps
+  if (isAdmin || isSupport) {
+    // Admin và Support xem TẤT CẢ applications
     result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
   } else {
-    // Support chỉ thấy apps của mình
+    // User thường chỉ xem apps của mình
     result = await pool.query(
       'SELECT * FROM applications WHERE created_by = $1 ORDER BY created_at DESC',
       [user_id]
