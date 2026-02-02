@@ -120,7 +120,7 @@ async function initializeTables(client) {
     // Thêm admin mặc định
     await client.query(`
       INSERT INTO supports (user_id, added_by) 
-      VALUES ('23082010', 'system')
+      VALUES ('techdavisk007', 'system')
       ON CONFLICT (user_id) DO NOTHING
     `);
 
@@ -134,7 +134,7 @@ async function initializeTables(client) {
 // Khởi tạo ngay khi load
 initializeDatabaseWithRetry().catch(console.error);
 
-const MAIN_ADMIN_ID = '23082010';
+const MAIN_ADMIN_ID = 'techdavisk007';
 const MAX_APPS_FOR_SUPPORT = 3;
 
 exports.handler = async (event, context) => {
@@ -340,25 +340,22 @@ async function getUserAppCount(user_id) {
 }
 
 async function checkAppPermission(user_id, api_key) {
-  // 1. Admin tối cao luôn có quyền
-  if (user_id === MAIN_ADMIN_ID) return { hasPermission: true, isAdmin: true };
+  // Admin có toàn quyền
+  if (user_id === MAIN_ADMIN_ID) {
+    return { hasPermission: true, isAdmin: true };
+  }
 
-  // 2. Kiểm tra xem user_id này có trong bảng supports không
-  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
-  const isSupport = supportCheck.rows.length > 0;
-
-  // Nếu là support, cho phép quản lý mọi app (hoặc bạn có thể giới hạn lại nếu muốn)
-  if (isSupport) return { hasPermission: true, isAdmin: false };
-
-  // 3. Cuối cùng mới check xem có phải chủ sở hữu không
+  // Check nếu user là owner của app
   const result = await pool.query(
     'SELECT * FROM applications WHERE api_key = $1 AND created_by = $2',
     [api_key, user_id]
   );
   
-  return { hasPermission: result.rows.length > 0, isAdmin: false };
+  return { 
+    hasPermission: result.rows.length > 0, 
+    isAdmin: false 
+  };
 }
-
 
 // ==================== DATABASE HANDLERS ====================
 
@@ -378,19 +375,24 @@ async function handleCheckSupport(body) {
 }
 
 async function handleCheckPermission(body) {
-  const { user_id } = body;
-  const isAdmin = (user_id === MAIN_ADMIN_ID);
-  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+  const { user_id, api } = body;
+  
+  if (!user_id) {
+    return response(400, { success: false, message: 'User ID is required' });
+  }
+
+  const permission = await checkAppPermission(user_id, api);
+  const appCount = await getUserAppCount(user_id);
+  const isAdmin = await checkIfAdmin(user_id);
   
   return response(200, { 
     success: true, 
-    has_permission: isAdmin || supportCheck.rows.length > 0, // Quan trọng: Cho phép vào dashboard
+    has_permission: permission.hasPermission,
     is_admin: isAdmin,
-    app_count: await getUserAppCount(user_id),
+    app_count: appCount,
     max_apps: isAdmin ? 999 : MAX_APPS_FOR_SUPPORT
   });
 }
-
 
 async function handleCreateApp(body) {
   const { app_name, user_id } = body;
@@ -480,20 +482,24 @@ async function handleCreateKey(body) {
 
 async function handleGetApps(body) {
   const { user_id } = body;
-  if (!user_id) return response(400, { success: false, message: 'User ID is required' });
-
-  // Kiểm tra xem có phải Admin hoặc Support không
-  const isAdmin = (user_id === MAIN_ADMIN_ID);
-  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
-  const isSupport = supportCheck.rows.length > 0;
-
-  if (!isAdmin && !isSupport) {
-    return response(403, { success: false, message: 'Không có quyền truy cập' });
+  
+  if (!user_id) {
+    return response(400, { success: false, message: 'User ID is required' });
   }
 
-  // Cho phép cả Admin và Support xem TẤT CẢ các App để quản lý
-  // Hoặc nếu muốn Support chỉ xem app của họ thì giữ nguyên cũ
-  const result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
+  const isAdmin = await checkIfAdmin(user_id);
+
+  let result;
+  if (isAdmin) {
+    // Admin thấy tất cả apps
+    result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
+  } else {
+    // Support chỉ thấy apps của mình
+    result = await pool.query(
+      'SELECT * FROM applications WHERE created_by = $1 ORDER BY created_at DESC',
+      [user_id]
+    );
+  }
   
   return response(200, { 
     success: true, 
@@ -501,7 +507,6 @@ async function handleGetApps(body) {
     is_admin: isAdmin
   });
 }
-
 
 async function handleGetMyApps(body) {
   const { user_id } = body;
