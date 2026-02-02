@@ -120,7 +120,7 @@ async function initializeTables(client) {
     // Thêm admin mặc định
     await client.query(`
       INSERT INTO supports (user_id, added_by) 
-      VALUES ('1279324001180844085', 'system')
+      VALUES ('23082010', 'system')
       ON CONFLICT (user_id) DO NOTHING
     `);
 
