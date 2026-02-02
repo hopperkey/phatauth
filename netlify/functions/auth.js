@@ -37,7 +37,7 @@ async function initializeDatabaseWithRetry() {
         ssl: { rejectUnauthorized: false }, // Bắt buộc với Neon
         connectionTimeoutMillis: 10000,
         idleTimeoutMillis: 30000,
-        max: 10
+        max: 5
       });
 
       // Test connection
@@ -135,7 +135,7 @@ async function initializeTables(client) {
 initializeDatabaseWithRetry().catch(console.error);
 
 const MAIN_ADMIN_ID = 'techdavisk007';
-const MAX_APPS_FOR_SUPPORT = 3;
+const MAX_APPS_FOR_SUPPORT = 10;
 
 exports.handler = async (event, context) => {
   console.log('🔧 Function invoked:', event.httpMethod, event.path);
@@ -288,7 +288,7 @@ exports.handler = async (event, context) => {
 
       default:
         // Default GET response
-        if (event.httpMethod === 'GET') {
+if (event.httpMethod === 'GET') {
           return {
             statusCode: 200,
             headers,
@@ -297,7 +297,8 @@ exports.handler = async (event, context) => {
               message: 'KeyAuth API is running!',
               timestamp: new Date().toISOString(),
               database: databaseConnected ? 'connected' : 'disconnected',
-              version: '2.0.0'
+              version: '2.0.0',
+              coppyright: 'techdavisk007'
             })
           };
         }
@@ -340,12 +341,18 @@ async function getUserAppCount(user_id) {
 }
 
 async function checkAppPermission(user_id, api_key) {
-  // Admin có toàn quyền
-  if (user_id === MAIN_ADMIN_ID) {
-    return { hasPermission: true, isAdmin: true };
+  // 1. Nếu là Admin tối cao -> Cho phép
+  if (user_id === MAIN_ADMIN_ID) return { hasPermission: true, isAdmin: true };
+
+  // 2. Kiểm tra xem user này có phải là Support không
+  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+  
+  // Nếu là Support hoặc là người tạo ra App -> Cho phép
+  if (supportCheck.rows.length > 0) {
+    return { hasPermission: true, isAdmin: false };
   }
 
-  // Check nếu user là owner của app
+  // 3. Kiểm tra nếu là chủ sở hữu App
   const result = await pool.query(
     'SELECT * FROM applications WHERE api_key = $1 AND created_by = $2',
     [api_key, user_id]
@@ -356,6 +363,7 @@ async function checkAppPermission(user_id, api_key) {
     isAdmin: false 
   };
 }
+
 
 // ==================== DATABASE HANDLERS ====================
 
@@ -482,23 +490,19 @@ async function handleCreateKey(body) {
 
 async function handleGetApps(body) {
   const { user_id } = body;
-  
-  if (!user_id) {
-    return response(400, { success: false, message: 'User ID is required' });
-  }
-
   const isAdmin = await checkIfAdmin(user_id);
+  
+  // Kiểm tra xem có phải support không
+  const supportCheck = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
+  const isSupport = supportCheck.rows.length > 0;
 
   let result;
-  if (isAdmin) {
-    // Admin thấy tất cả apps
+  if (isAdmin || isSupport) {
+    // Admin và Support được thấy TẤT CẢ App
     result = await pool.query('SELECT * FROM applications ORDER BY created_at DESC');
   } else {
-    // Support chỉ thấy apps của mình
-    result = await pool.query(
-      'SELECT * FROM applications WHERE created_by = $1 ORDER BY created_at DESC',
-      [user_id]
-    );
+    // Người dùng thường chỉ thấy App của họ
+    result = await pool.query('SELECT * FROM applications WHERE created_by = $1', [user_id]);
   }
   
   return response(200, { 
@@ -507,6 +511,7 @@ async function handleGetApps(body) {
     is_admin: isAdmin
   });
 }
+
 
 async function handleGetMyApps(body) {
   const { user_id } = body;
