@@ -119,13 +119,13 @@ async function initializeTables(client) {
 
     // Thêm admin mặc định
     // Thêm admin mặc định (ĐÃ VÔ HIỆU HÓA ĐỂ TRÁNH LỖI TỰ CHÈN)
-/*
+
 await client.query(`
   INSERT INTO supports (user_id, added_by) 
   VALUES ('techdavisk007', 'system')
   ON CONFLICT (user_id) DO NOTHING
 `);
-*/
+
 
     console.log('✅ Database tables initialized');
   } catch (error) {
@@ -372,17 +372,24 @@ async function checkAppPermission(user_id, api_key) {
 
 async function handleCheckSupport(body) {
   const { user_id } = body;
-  
-  if (!user_id) {
-    return response(400, { success: false, message: 'User ID is required' });
-  }
+  if (!user_id) return response(400, { success: false, message: 'User ID is required' });
 
   const result = await pool.query('SELECT * FROM supports WHERE user_id = $1', [user_id]);
-  return response(200, { 
-    success: true, 
-    is_support: result.rows.length > 0,
-    user: result.rows[0] || null
-  });
+  
+  if (result.rows.length > 0) {
+    return response(200, { 
+      success: true, 
+      is_support: true,
+      user: result.rows[0]
+    });
+  } else {
+    // Nếu không tìm thấy trong Database, phải trả về success: false
+    return response(200, { 
+      success: false, 
+      is_support: false, 
+      message: 'User không có quyền truy cập' 
+    });
+  }
 }
 
 async function handleCheckPermission(body) {
