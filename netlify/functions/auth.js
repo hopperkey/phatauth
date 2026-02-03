@@ -806,29 +806,17 @@ async function handleDeleteSupport(body) {
 }
 
 async function handleGetSupports() {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        s.id,
-        s.user_id,
-        s.added_by,
-        s.added_at,
-        COALESCE(COUNT(a.id), 0) AS app_count
-      FROM supports s
-      LEFT JOIN applications a 
-        ON a.created_by = s.user_id
-      GROUP BY s.id
-      ORDER BY s.added_at DESC
-    `);
-
-    return response(200, { 
-      success: true, 
-      supports: result.rows 
-    });
-  } catch (error) {
-    console.error('❌ Lỗi Get Supports:', error);
-    return response(500, { success: false, message: 'Không thể tải danh sách support' });
-  }
+    try {
+        // Lấy danh sách support mới nhất hiện lên đầu
+        const result = await pool.query('SELECT * FROM supports ORDER BY added_at DESC');
+        return response(200, { 
+            success: true, 
+            supports: result.rows 
+        });
+    } catch (error) {
+        console.error('❌ Lỗi Get Supports:', error);
+        return response(500, { success: false, message: 'Không thể tải danh sách support' });
+    }
 }
 
 async function handleValidateKey(body) {
