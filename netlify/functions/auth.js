@@ -33,12 +33,14 @@ async function initializeDatabaseWithRetry() {
       
       // Tạo connection pool - dùng NETLIFY_DATABASE_URL
       pool = new Pool({
-        connectionString: databaseUrl,
-        ssl: { rejectUnauthorized: false }, // Bắt buộc với Neon
-        connectionTimeoutMillis: 10000,
-        idleTimeoutMillis: 30000,
-        max: 3
-      });
+  connectionString: databaseUrl,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 30000,       // ↑ lên 30s để chịu cold start tốt hơn
+  idleTimeoutMillis: 10000,             // ↓ xuống 10s để close idle nhanh, tránh giữ connection chết
+  max: 5,                               // ↑ nhẹ nếu traffic cao, nhưng đừng quá cao (Neon pooled max ~10k tổng)
+  keepAlive: true,                      // Giữ TCP alive, giảm ECONNRESET
+  keepAliveInitialDelayMillis: 10000,   // Delay trước khi send keep-alive probe
+});
 
       // Test connection
       const client = await pool.connect();
