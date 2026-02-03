@@ -11,7 +11,7 @@ async function initializeDatabaseWithRetry() {
   }
   
   initializationAttempted = true;
-  const maxRetries = 3;
+  const maxRetries = 5;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -37,7 +37,7 @@ async function initializeDatabaseWithRetry() {
         ssl: { rejectUnauthorized: false }, // Bắt buộc với Neon
         connectionTimeoutMillis: 10000,
         idleTimeoutMillis: 30000,
-        max: 5
+        max: 10
       });
 
       // Test connection
