@@ -11,7 +11,7 @@ async function initializeDatabaseWithRetry() {
   }
   
   initializationAttempted = true;
-  const maxRetries = 5;
+  const maxRetries = 3;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -37,7 +37,7 @@ async function initializeDatabaseWithRetry() {
         ssl: { rejectUnauthorized: false }, // Bắt buộc với Neon
         connectionTimeoutMillis: 10000,
         idleTimeoutMillis: 30000,
-        max: 10
+        max: 3
       });
 
       // Test connection
@@ -465,37 +465,51 @@ async function handleCreateKey(body) {
   const { api, prefix, days, device_limit, user_id } = body;
   
   if (!api || !prefix || !days || !user_id) {
-    return response(400, { success: false, message: 'Missing required fields: api, prefix, days, user_id' });
+    return response(400, { success: false, message: 'Missing required fields' });
   }
 
-  // Check permission
-  const permission = await checkAppPermission(user_id, api);
-  if (!permission.hasPermission) {
-    return response(403, { success: false, message: 'Bạn không có quyền tạo key cho application này' });
+  // 1. Lấy một kết nối riêng từ Pool
+  const client = await pool.connect();
+
+  try {
+    // 2. Check permission (Nên truyền client vào hàm này luôn nếu được)
+    const permission = await checkAppPermission(user_id, api);
+    if (!permission.hasPermission) {
+      return response(403, { success: false, message: 'Không có quyền tạo key' });
+    }
+
+    const keyString = `${prefix}-${generateKey()}`;
+    const expires_at = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const deviceLimit = parseInt(device_limit) || 1;
+
+    // 3. Sử dụng client.query thay vì pool.query
+    const appResult = await client.query('SELECT * FROM applications WHERE api_key = $1', [api]);
+    if (appResult.rows.length === 0) {
+      return response(200, { success: false, message: 'Invalid API' });
+    }
+
+    await client.query(
+      `INSERT INTO keys (key, api, prefix, expires_at, device_limit) 
+       VALUES ($1, $2, $3, $4, $5)`,
+      [keyString, api, prefix, expires_at, deviceLimit]
+    );
+
+    console.log('✅ Key created:', keyString);
+
+    // 4. Trả về kết quả ngay lập tức
+    return response(200, { 
+      success: true, 
+      message: 'Key created successfully',
+      key: keyString 
+    });
+
+  } catch (error) {
+    console.error('❌ Lỗi tạo key:', error.message);
+    return response(500, { success: false, message: 'Lỗi server: ' + error.message });
+  } finally {
+    // 5. QUAN TRỌNG NHẤT: Trả lại kết nối về cho Pool bất kể thành công hay thất bại
+    client.release();
   }
-
-  const keyString = `${prefix}-${generateKey()}`;
-  const expires_at = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  const deviceLimit = parseInt(device_limit) || 1;
-
-  // Check if app exists
-  const appResult = await pool.query('SELECT * FROM applications WHERE api_key = $1', [api]);
-  if (appResult.rows.length === 0) {
-    return response(200, { success: false, message: 'Invalid API' });
-  }
-
-  await pool.query(
-    `INSERT INTO keys (key, api, prefix, expires_at, device_limit) 
-     VALUES ($1, $2, $3, $4, $5)`,
-    [keyString, api, prefix, expires_at, deviceLimit]
-  );
-
-  console.log('✅ Key created:', keyString);
-  return response(200, { 
-    success: true, 
-    message: 'Key created successfully',
-    key: keyString 
-  });
 }
 
 async function handleGetApps(body) {
