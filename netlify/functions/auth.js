@@ -124,7 +124,7 @@ async function initializeTables(client) {
 
 await client.query(`
   INSERT INTO supports (user_id, added_by) 
-  VALUES ('techdavisk007', 'system')
+  VALUES ('vmp123pp', 'system')
   ON CONFLICT (user_id) DO NOTHING
 `);
 
@@ -139,7 +139,7 @@ await client.query(`
 // Khởi tạo ngay khi load
 initializeDatabaseWithRetry().catch(console.error);
 
-const MAIN_ADMIN_ID = 'techdavisk007';
+const MAIN_ADMIN_ID = 'vmp123pp';
 const MAX_APPS_FOR_SUPPORT = 10;
 
 exports.handler = async (event, context) => {
